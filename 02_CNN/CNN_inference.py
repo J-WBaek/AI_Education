@@ -12,3 +12,4 @@ predict = model.predict(f_image_test[:num])
 print(f_label_test[:num])
 print(" * Prediction, ", np.argmax(predict, axis = 1))
 
+ 
