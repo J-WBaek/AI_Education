@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img
 import os
+import pickle
 
 img_height = 64
 img_width = 64
@@ -54,3 +55,12 @@ model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
 history = model.fit(train_ds,
           validation_data = val_ds,
           epochs = 10)
+
+
+model.save('penumonia.keras')
+
+with open('history_xray','wb') as pf:
+    pickle.dump(history, pf)
+
+
+
