@@ -39,7 +39,6 @@ val_ds = val_datagen.flow_from_directory(os.path.join(path, val_path),
                                                 batch_size = batch_size,
                                                 class_mode='binary')
 
-
 model_in = tf.keras.Input(shape=(img_height, img_width, 3))
 x = tf.keras.layers.Flatten()(model_in)
 x = tf.keras.layers.Dense(128, activation = 'relu')(x)
@@ -61,6 +60,4 @@ model.save('penumonia.keras')
 
 with open('history_xray','wb') as pf:
     pickle.dump(history, pf)
-
-
 
