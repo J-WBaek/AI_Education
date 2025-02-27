@@ -2,6 +2,7 @@ import pickle
 import matplotlib.pyplot as plt
 from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img
 import tensorflow as tf
+import numpy as np
 import os
 
 img_height = 64
@@ -19,16 +20,15 @@ plt.plot(ann_model.history['val_accuracy'])
 plt.title('Model Accuracy')
 plt.ylabel('Accuracy')
 plt.xlabel('Epoch')
-plt.legend(['Training set', 'Validation set'], loc='upper left')
-plt.savefig('train_accuracy.png')
+plt.legend(['Train set', 'Validation set'], loc='upper left')
 plt.subplot(1,2,2)
 plt.plot(ann_model.history['val_loss'])
 plt.plot(ann_model.history['loss'])
 plt.title('Model Loss')
 plt.ylabel('Loss')
 plt.xlabel('Epoch')
-plt.legend(['Training set', 'Test set'], loc='upper left')
-plt.savefig('train_loss.png')
+plt.legend(['Train set', 'Validation set'], loc='upper left')
+plt.savefig('training_accuracy_loss.png')
 plt.show(block=False)
 
 model = tf.keras.models.load_model('penumonia.keras')
@@ -56,3 +56,25 @@ test_ds = test_datagen.flow_from_directory(os.path.join(path, train_path),
                                                 class_mode = 'binary')
 
 
+test_img, test_label = next(iter(test_ds))
+test_img = np.array(test_img)
+test_label = np.array(test_label)
+# print(test_img.shape, test_label.shape)
+predict = model(test_img)
+predict = np.array(predict)
+Class_name = ['NORMAL', 'PNEUMONIA'] 
+print('NORMAL', ' | ', 'PNEUMONIA')
+plt.figure(figsize=(28,28))
+
+for idx in range(25):
+    target_idx = np.argmax(test_label[idx])
+    predict_idx = np.round(predict[idx]).astype(int).squeeze()
+    print(Class_name[target_idx], " | ", Class_name[predict_idx])
+    plt.subplot(5,5,idx+1)
+    plt.imshow(test_img[idx:idx+1].squeeze())
+    plt.axis('off')
+    plt.title(f'Label target: {Class_name[target_idx]}' + '\n' + 
+              f'Label predict: {Class_name[predict_idx]}' , fontdict= {'fontsize': 22})
+plt.subplots_adjust(hspace=0.3, wspace=0.3)
+plt.savefig('test_results.jpg')
+plt.show()
