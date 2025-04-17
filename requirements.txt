@@ -3,3 +3,10 @@ opencv-python
 matplotlib
 numpy
 finance-datareader
+langchain_community
+torch
+torchaudio
+torchvision
+sentence-transformers
+sentencepiece
+sacremoses

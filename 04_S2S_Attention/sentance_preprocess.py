@@ -62,3 +62,9 @@ def read_language(L1, L2, reverse=False, verbose=False):
         print(pairs)
     
     return Encode_lang, Decode_lang, pairs
+
+def tokenize(sentence):
+    """정규화 후 공백 기준으로 단어 리스트로 분리"""
+    normalized = Norm_String(sentence)
+    tokens = normalized.split()       # 공백 기준으로 분리
+    return tokens
