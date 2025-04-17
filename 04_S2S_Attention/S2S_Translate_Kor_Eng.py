@@ -98,8 +98,7 @@ class DecoderAttention(nn.Module):
         attention = []
 
         for idx in range(context_length):
-            
-        
+  
     def forward_1_step(self, input_word, hidden_from_encoder):
         embedded_input_word = self.embedding_in(input_word)
         output, hidden = self.module(embedded_input_word, hidden_from_encoder)
