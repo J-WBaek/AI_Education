@@ -7,6 +7,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import AutoTokenizer, AutoModel
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn.functional as F
+from tqdm.auto import tqdm
 
 SOS_token = 0
 EOS_token = 1
@@ -153,8 +154,17 @@ class DecoderAttention(nn.Module):
         #sel_tock  = F.softmax(logits, dim=-1)  
         return logits.unsqueeze(1)
 
+# 저장 checkpoint
+def save_checkpoint(encoder, decoder, optimizer, epoch, path = "check_point.pth"):
+    torch.save({
+        'epoch': epoch,
+        'encoder_state_dict': encoder.state_dict(),
+        'decoder_state_dict': decoder.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict()
+    }, path)
+    print(f"Checkpoint saved to {path}")
 
-# 5) 모델, 옵티마이저, 손실함수
+# Layer의 크기 선언.
 embed_size  = 16
 hidden_size = 16
 src_vocab   = tokenizer.vocab_size
@@ -163,14 +173,15 @@ tgt_vocab   = tokenizer.vocab_size
 encoder = Encoder(src_vocab, embed_size, hidden_size).to(device)
 decoder = DecoderAttention(tgt_vocab, embed_size, hidden_size, max_length=target_ids.size(1), device=device).to(device)
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=1e-3)
-criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
+criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
-# 6) 학습 루프
-num_epochs = 10
+# 학습실행
+num_epochs = 100
 for epoch in range(1, num_epochs+1):
     encoder.train(); decoder.train()
     total_loss = 0
 
+    loop = tqdm(loader, desc=f"Epoch {epoch}/{num_epochs}", unit="batch")
     for src_ids, tgt_ids in loader:
         src_ids, tgt_ids = src_ids.to(device), tgt_ids.to(device)
 
@@ -179,7 +190,7 @@ for epoch in range(1, num_epochs+1):
         # dec_output (batch, tgt_len, vocab) 
         dec_outputs = decoder(enc_outs, enc_hidden, target_tensor=tgt_ids)
 
-        # loss: 시퀀스 길이별 합으로 계산
+        # loss: sequence length 의 합으로.
         batch_loss = 0
         for t in range(tgt_ids.size(1)):
             batch_loss += criterion(dec_outputs[:, t, :], tgt_ids[:, t])
@@ -187,8 +198,10 @@ for epoch in range(1, num_epochs+1):
 
         batch_loss.backward()
         optimizer.step()
-
         total_loss += batch_loss.item()
-
-    avg_loss = total_loss / len(loader)
-    print(f"Epoch {epoch:2d}  Loss: {avg_loss:.4f}")
+        loop.set_postfix(loss=batch_loss.item())
+    
+    avg_loss = total_loss / len(loader)    
+    print(f"Epoch {epoch:2d}  Loss: {total_loss:.4f}")
+    
+saev_checkpoint(encoder, decoder, optimizer, num_epochs, path='final_model.pth')
