@@ -6,6 +6,7 @@ from  sentance_preprocess import read_language
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import AutoTokenizer, AutoModel
 from torch.utils.data import TensorDataset, DataLoader
+import torch.nn.functional as F
 
 SOS_token = 0
 EOS_token = 1
@@ -17,7 +18,10 @@ for idx in range(10):
     print(random.choice(pairs))
 
 tokenizer = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-ko-en")
-encoded_input = tokenizer(lang_input, padding=True, truncation=True, return_tensors="pt")
+# padding : 문장들을 같은 길이로 맞춤.
+# truncation : 문장의 길이를 해당 모델의 최대 길이로 제한함.
+# return_tensors : framework
+encoded_input = tokenizer(lang_input, padding=True, truncation=True, return_tensors="pt")  
 decoded_input = tokenizer(lang_output, padding=True, truncation=True, return_tensors="pt")
 
 input_ids     = encoded_input["input_ids"].to(device)      # (N, src_len)
@@ -30,11 +34,12 @@ class Encoder(nn.Module):
 #                moduleSelect = int,
                 vocab_size : int,
                 embed_size : int,
-                hidden_size ,
+                hidden_size,
                 dropout = 0.1,
+                device = 'cuda'
                 ):
         super().__init__()
-
+        print("vocabsize",vocab_size, "embed_size", embed_size, "hidden_size", hidden_size)
         self.hidden_size = hidden_size
         self.embedding = nn.Embedding(vocab_size, embed_size, padding_idx=tokenizer.pad_token_id)
         self.GRU = nn.GRU(embed_size, hidden_size, batch_first=True)
@@ -57,23 +62,21 @@ class Attention(nn.Module):
         key = key
         query = query
         value = key
-
+        
         # query          (batch, 1, wodvec)
         # key            (batch, sentance(E), wordvec)
         # key.permute    (batch, wodvec, sentance(E))
         # Attscore       (batch, 1, sentance(E))
         Attscore =  torch.bmm(query, key.permute(0, 2, 1))
 
-        # softmax,
+        # softmax
         Attscore = self.softmax(Attscore)
 
         # Attscore (batch, 1, sentance(E))
         # value    (batch, sentance(E), wordvec)
         # cross_att (batch, 1, wordvec)
         context = torch.bmm(Attscore, value)
-
-        return context, Attscore
-
+        return context, query
 
 class DecoderAttention(nn.Module):
     def __init__(self,
@@ -81,84 +84,84 @@ class DecoderAttention(nn.Module):
                 embed_size : int,
                 hidden_size : int,   #
                 max_length = 100,
+                device = 'cuda'
                 ):
         super().__init__()
 
         self.hidden_size  = hidden_size
-        self.embedding = nn.Embedding(vocab_size, embed_size, padding_idx=tokenizer.pad_token_id)
-        self.attention = Attention(hidden_size)
-
-        self.GRU  = nn.GRU(embed_size, hidden_size)
-        self.out     = nn.Linear(hidden_size, vocab_size)
+        self.embedding = nn.Embedding(vocab_size, embed_size, padding_idx=tokenizer.pad_token_id).to(device)
+        self.attention = Attention(hidden_size).to(device)
+        self.GRU  = nn.GRU(embed_size, hidden_size, batch_first=True)
+        self.out     = nn.Linear(hidden_size, vocab_size).to(device)
+        self.attn_combine = nn.Linear(2*hidden_size, hidden_size).to(device)
+        
         self.max_len = max_length
+        self.device = device
+        self.to(device)
         
-    # def forward(self, encoder_outputs, encoder_hidden, target_tensor = None): 
-    #     # input_context: encoder_output, input_hidden: encoder_hidden, 
-    #     # context : (b, sentance_length, word_vec)
-        
-    #     batch_size, context_length, context_dims = input_context.size
-    #     decoder_input_current = torch.empty( (batch_size, 1), dtype=torch.long, device=device).fill_(SOS_token)
-    #     decoder_hidden = input_context
-
-    #     decoder_outputs = []
-    #     attention = []
-
-    #     #for idx in range(context_length):
     def forward(self, encoder_outputs, encoder_hidden, target_tensor=None, teacher_forcing_ratio=0.5):
         """
-        encoder_outputs: (batch, src_len, H)
-        encoder_hidden:  (1, batch, H)
+        encoder_outputs: (batch, src_len, Hidden)
+        encoder_hidden:  (1, batch, Hidden)
         target_tensor:   (batch, tgt_len)
         """
         batch_size  = encoder_outputs.size(0)
-        tgt_len     = target_tensor.size(1) if target_tensor is not None else self.max_len
-        vocab_size  = self.out.out_features
+        if target_tensor is not None:
+            tgt_len = target_tensor.size(1) # sentance_length
+        else:
+            tgt_len = self.max_len
+        vocab_size  = self.out.out_features # 출력 벡터의 차원 수 (in_feature는 입력 벡터의 차원 수)
 
-        # 첫 입력은 <sos>
-        decoder_input  = torch.full((batch_size,1), SOS_token, dtype=torch.long, device=device)
-        decoder_hidden = encoder_hidden
-        outputs = torch.zeros(batch_size, tgt_len, vocab_size, device=device)
-
-        for t in range(tgt_len):
-            step_logits, decoder_hidden, attn_w = self.forward_1_step(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
-            outputs[:, t, :] = step_logits.squeeze(1)
-
-            # teacher forcing
-            if target_tensor is not None and random.random() < teacher_forcing_ratio:
-                decoder_input = target_tensor[:, t].unsqueeze(1)    # (batch,1)
+        # <SOS>
+        decoder_input  = torch.full((batch_size,1), SOS_token, dtype=torch.long).to(self.device)
+        decoder_hidden = encoder_hidden.to(self.device)
+         
+        # output : (batch, sentance_len, Hidden)
+        outputs = torch.zeros(batch_size, tgt_len, vocab_size, device=self.device)
+        
+        # sentance 길이만큼 반복해야 함.
+        for sent_idx in range(tgt_len):
+            sel_tok = self.forward_1_step(decoder_input, decoder_hidden, encoder_outputs)
+            # 저장.
+            outputs[:, sent_idx, :] = sel_tok.squeeze(1)
+            # 다음 입력 처리
+            # teacher forcing을 통해 정답을 넣을지 예측을 넣을지 정함.
+            if (target_tensor is not None and
+                random.random() < teacher_forcing_ratio):
+                # 정답 입력
+                decoder_input = target_tensor[:, sent_idx].unsqueeze(1)
             else:
-                top1 = step_logits.argmax(2)                        # (batch,1)
-                decoder_input = top1
-
+                #예측 입력
+                top1 = sel_tok.argmax(dim=2)  
+                decoder_input = top1 
+         
         return outputs
 
     def forward_1_step(self, input_word, hidden, hidden_from_encoder):
         
-        embedded_input_word = self.embedding(input_word) 
         # Query (batch, sentance_len, word_vec) ====> (batch, word_vec, setance_len) 
         # output (batch, sentance_len, word_vec)
-        context, attn_weight = self.attention(embedded_input_word, hidden_from_encoder)
-        GRU_input = torch.cat((embedded_input_word, context), dim=2) # (batch, 1, en + hid)
+        # attention(query, key)
+        embedded_input_word = self.embedding(input_word)
 
-        output, hidden1 = self.GRU(GRU_input, hidden)
-
-        logits = self.out(output.squeeze(1)) # (batch, vocab_size)
-
-        decoder_outputs.append(decoder_output)
-        return output, hidden
+        output, hidden1 = self.GRU(embedded_input_word, hidden)
+        context, att_score = self.attention(output, hidden_from_encoder)
+        concat = torch.cat((output, context), dim=2)
+        combined = torch.tanh(self.attn_combine(concat.squeeze(1)))
+        
+        logits = self.out(combined)
+        #sel_tock  = F.softmax(logits, dim=-1)  
+        return logits.unsqueeze(1)
 
 
 # 5) 모델, 옵티마이저, 손실함수
-embed_size  = 256
-hidden_size = 256
+embed_size  = 16
+hidden_size = 16
 src_vocab   = tokenizer.vocab_size
 tgt_vocab   = tokenizer.vocab_size
 
 encoder = Encoder(src_vocab, embed_size, hidden_size).to(device)
-decoder = DecoderAttention(tgt_vocab, embed_size, hidden_size, max_length=target_ids.size(1)).to(device)
-
+decoder = DecoderAttention(tgt_vocab, embed_size, hidden_size, max_length=target_ids.size(1), device=device).to(device)
 optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=1e-3)
 criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
 
@@ -173,8 +176,7 @@ for epoch in range(1, num_epochs+1):
 
         optimizer.zero_grad()
         enc_outs, enc_hidden = encoder(src_ids)
-
-        # 디코더가 (batch, tgt_len, vocab) 리턴
+        # dec_output (batch, tgt_len, vocab) 
         dec_outputs = decoder(enc_outs, enc_hidden, target_tensor=tgt_ids)
 
         # loss: 시퀀스 길이별 합으로 계산
