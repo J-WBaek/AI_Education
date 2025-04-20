@@ -182,7 +182,7 @@ for epoch in range(1, num_epochs+1):
     total_loss = 0
 
     loop = tqdm(loader, desc=f"Epoch {epoch}/{num_epochs}", unit="batch")
-    for src_ids, tgt_ids in loader:
+    for src_ids, tgt_ids in loop:
         src_ids, tgt_ids = src_ids.to(device), tgt_ids.to(device)
 
         optimizer.zero_grad()
@@ -202,6 +202,6 @@ for epoch in range(1, num_epochs+1):
         loop.set_postfix(loss=batch_loss.item())
     
     avg_loss = total_loss / len(loader)    
-    print(f"Epoch {epoch:2d}  Loss: {total_loss:.4f}")
+    print(f"Epoch {epoch:2d}  Loss: {avg_loss:.4f}")
     
 saev_checkpoint(encoder, decoder, optimizer, num_epochs, path='final_model.pth')
