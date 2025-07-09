@@ -1,0 +1,9 @@
+tensorflow
+opencv-python
+matplotlib
+numpy
+finance-datareader
+langchain_community
+sentence-transformers
+sentencepiece
+sacremoses
